@@ -35,6 +35,10 @@ Linux (amd64)
 
 <hr/>
 
+`concat file1 file2 ...`
+
+result will be a file named the current timestamp.  
+
 optional argument to add some spacing between files (otherwise they are binary copy)  
 
 `"--sep=SEPARATOR"` or `"--sep" "SEPARATOR"`  
