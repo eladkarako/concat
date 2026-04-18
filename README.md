@@ -16,21 +16,21 @@ you won't see any error messages though.
 
 <hr/>
 
-get the latest binaries from the release section (same name convention).
+get the latest binaries from the release section, same name convention.
 https://github.com/eladkarako/concat/releases/latest  
 
 
 Windows (amd64)  
-- x86_64-pc-windows-msvc.zip  
+- x86_64-pc-windows-msvc.zip - https://github.com/eladkarako/concat/releases/latest/download/x86_64-pc-windows-msvc.zip  
 
 Android (built with NDK r27c)  
-- aarch64-linux-android.zip  
-- armv7-linux-androideabi.zip  
-- x86_64-linux-android.zip  
+- aarch64-linux-android.zip - https://github.com/eladkarako/concat/releases/latest/download/aarch64-linux-android.zip  
+- armv7-linux-androideabi.zip - https://github.com/eladkarako/concat/releases/latest/download/armv7-linux-androideabi.zip  
+- x86_64-linux-android.zip - https://github.com/eladkarako/concat/releases/latest/download/x86_64-linux-android.zip  
 
-Linux (amd64)
-- x86_64-unknown-linux-gnu.zip  
-- x86_64-unknown-linux-musl.zip  
+Linux (amd64)  
+- x86_64-unknown-linux-gnu.zip - https://github.com/eladkarako/concat/releases/latest/download/x86_64-unknown-linux-gnu.zip  
+- x86_64-unknown-linux-musl.zip - https://github.com/eladkarako/concat/releases/latest/download/x86_64-unknown-linux-musl.zip  
 
 
 <hr/>
@@ -39,7 +39,7 @@ optional argument to add some spacing between files (otherwise they are binary c
 
 `"--sep=SEPARATOR"` or `"--sep" "SEPARATOR"`  
 
-you can use several preserved phrases to make the separator nicer, thouse will be replaced in-program:
+you can use several preserved phrases to make the separator nicer, thouse will be replaced in-program:  
 - `####r####` - `\r`
 - `####n####` - `\n`
 - `####t####` - `\t`
