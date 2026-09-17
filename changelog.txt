@@ -1,0 +1,9 @@
+26.9.18
++ fixed non-working functionality, result looks like Unicode.
++ streaming based adding.
++ supporting initial stdin.
++ versioning (same for git tag and release name and version.txt)
++ windows versioninfo, icon, manifest.
+
+"0.1.0" === 2026.04.18.1657 (2026-04-18T15:26:54.000Z)
++ initial (original)

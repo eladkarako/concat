@@ -1,7 +1,22 @@
 [package]
 name = "concat"
-version = "0.1.0"
+version = "26.9.18"
 edition = "2024"
 
 [dependencies]
-chrono = { version = "0.4", features = ["clock"] }
+
+[build-dependencies]
+winres = "0.1.12"
+
+
+[profile.release]
+opt-level = "z"          # “z” = maximum size reduction (equivalent to -C opt-level=s)
+lto = true               # Link‑time optimisation
+codegen-units = 1        # Better optimisation (single codegen unit)
+panic = "abort"          # Remove unwinding tables
+debug = false            # No debug info
+strip = true             # Strip symbols (requires rustc 1.56+)
+rpath = false            # Don't embed runtime library paths
+incremental = false      # Disable incremental compilation (cleaner builds)
+
+

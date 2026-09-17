@@ -1,163 +1,423 @@
-use chrono::Utc;
-use std::env;
-use std::fs::OpenOptions;
-use std::io::{BufReader, BufWriter, Read, Write};
-use std::path::Path;
-use std::process;
+use std::{
+    env,
+    fs::{self, File, OpenOptions},
+    io::{self, BufReader, BufWriter, IsTerminal, Read, Write},
+    path::{Path, PathBuf},
+    process,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-fn main() {
-    let raw_args: Vec<String> = env::args().skip(1).collect();
-    let mut sep_template = String::new();
-    let mut files: Vec<String> = Vec::new();
+const BUFFER_SIZE: usize = 64 * 1024;
 
-    // managed indexed loop for parsing
-    let mut i = 0;
-    while i < raw_args.len() {
-        let a = &raw_args[i];
-        if a.starts_with("--sep=") {
-            sep_template = a["--sep=".len()..].to_string();
-            i += 1;
-        } else if a == "--sep" {
-            i += 1;
-            if i < raw_args.len() {
-                sep_template = raw_args[i].clone();
-                i += 1;
-            } else {
-                eprintln!("Missing value after --sep");
-            }
-        } else {
-            files.push(a.clone());
-            i += 1;
-        }
-    }
+#[derive(Debug)]
+struct Options {
+    files: Vec<String>,
+    separator: Vec<u8>,
+    output: Option<PathBuf>,
+    stdin_positions: Vec<usize>,
+    stdin_ignored: bool,
+    show_help: bool,
+}
 
-    if files.is_empty() {
-        eprintln!(
-            "Usage: concat [\"--sep=SEPARATOR\" | \"--sep\" \"SEPARATOR\"] <file1> <file2> ..."
-        );
-        eprintln!(
-            "include any text, as well as ####?#### - replace ? with r for \\r (same for n and t), file,name,ext for full path, just filename, or extension. index,total - ordinal in list of files."
-        );
-        eprintln!("examples:");
-        eprintln!(
-            "... \"--sep=####r########n########r########n####;####file########r########n####\""
-        );
-        eprintln!(
-            "... \"--sep=####r########n########r########n####;####index####/####total########r########n####\""
-        );
-        process::exit(2);
-    }
+fn print_help(program: &str) {
+    println!(
+        r#"Usage:
+  {program} [OPTIONS] [FILES...]
 
-    // validate
-    let mut valid: Vec<String> = Vec::new();
-    for f in files {
-        let p = Path::new(&f);
-        match p.metadata() {
-            Ok(md) if md.is_file() => valid.push(f),
-            Ok(_) => eprintln!("Skipping (not a file): {}", p.display()),
-            Err(e) => eprintln!("Skipping (error accessing): {}: {}", p.display(), e),
-        }
-    }
-    if valid.is_empty() {
-        eprintln!("No valid input files.");
-        process::exit(3);
-    }
+Concatenate files in the order given.
 
-    let total = valid.len();
-    let out_name = format!("{}.txt", Utc::now().format("%Y%m%d%H%M%S"));
-    let out_file = match OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(true)
-        .open(&out_name)
-    {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("Error opening '{}': {}", out_name, e);
-            process::exit(4);
-        }
-    };
-    let mut writer = BufWriter::with_capacity(16 * 1024, out_file);
-    let mut had_error = false;
+Options:
+  --sep=VALUE
+      Bytes placed between each input value.
 
-    for (idx, path_str) in valid.iter().enumerate() {
-        let index = idx + 1;
-        let path = Path::new(path_str);
-        let filename_only = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or(path_str);
-        let extension_only = path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or(path_str);
+      Special value:
+        EOL     Use the current operating-system line ending.
 
-        if !sep_template.is_empty() {
-            let sep = sep_template
-                .replace("####r####", "\r")
-                .replace("####n####", "\n")
-                .replace("####t####", "\t")
-                .replace("####file####", path_str)
-                .replace("####name####", filename_only)
-                .replace("####ext####", extension_only)
-                .replace("####index####", &index.to_string())
-                .replace("####total####", &total.to_string());
-            if let Err(e) = writer.write_all(sep.as_bytes()) {
-                eprintln!("Error writing sep: {}", e);
-                had_error = true;
-            }
-            if let Err(e) = writer.flush() {
-                eprintln!("Error flushing sep: {}", e);
-                had_error = true;
-            }
-        }
+      Examples:
+        --sep=EOL
+        --sep=---
+        --sep="\\n"
 
-        match OpenOptions::new().read(true).open(path) {
-            Ok(f) => {
-                let mut r = BufReader::with_capacity(8 * 1024, f);
-                let mut buf = [0u8; 8 * 1024];
-                let mut copied: u64 = 0;
-                loop {
-                    match r.read(&mut buf) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            if let Err(e) = writer.write_all(&buf[..n]) {
-                                eprintln!("Write error '{}': {}", path.display(), e);
-                                had_error = true;
-                                break;
-                            }
-                            copied += n as u64;
-                        }
-                        Err(e) => {
-                            eprintln!("Read error '{}': {}", path.display(), e);
-                            had_error = true;
-                            break;
-                        }
+  --out=FILE
+      Write output to FILE instead of stdout.
+
+  --out
+  --out=
+      Write output to a file named with the current timestamp:
+        yyyymmddhhmmss.txt
+
+  --push-stdin-at=POSITION
+      Insert non-interactive stdin at the specified position.
+
+      POSITION may be:
+        first   Same as position 0
+        last    After all files
+        ignore  Do not include stdin
+        NUMBER  Zero-based insertion position
+
+      Position 0 places stdin before the first file.
+      Position 3 places stdin after the second file and before
+      the third file.
+
+      Positions larger than the number of files mean last.
+
+      This option may be repeated. Duplicate positions are merged.
+
+      If stdin is non-interactive and this option is not used,
+      stdin is inserted first by default.
+
+  -h, --help
+      Show this help.
+
+Examples:
+  {program} a.txt b.txt
+
+  {program} --sep=EOL a.txt b.txt
+
+  cat header.txt | {program} --sep=EOL a.txt b.txt
+
+  cat header.txt | {program} \
+      --push-stdin-at=last \
+      --sep=EOL a.txt b.txt
+
+  {program} --out=combined.txt a.txt b.txt
+
+  {program} --out --sep=EOL a.txt b.txt
+"#
+    );
+}
+
+fn parse_args() -> Result<Options, String> {
+    let mut files = Vec::new();
+    let mut separator = Vec::new();
+    let mut output = None;
+    let mut stdin_positions = Vec::new();
+    let mut stdin_ignored = false;
+    let mut show_help = false;
+    let mut separator_was_set = false;
+
+    let args: Vec<String> = env::args().skip(1).collect();
+
+    for arg in args {
+        if arg == "-h" || arg == "--help" {
+            show_help = true;
+        } else if let Some(value) = arg.strip_prefix("--sep=") {
+            separator = parse_separator(value)?;
+            separator_was_set = true;
+        } else if arg == "--out" || arg == "--out=" {
+            output = Some(PathBuf::new());
+        } else if let Some(value) = arg.strip_prefix("--out=") {
+            output = Some(PathBuf::from(value));
+        } else if let Some(value) = arg.strip_prefix("--push-stdin-at=") {
+            match value.to_ascii_lowercase().as_str() {
+                "ignore" => {
+                    stdin_ignored = true;
+                    stdin_positions.clear();
+                }
+                "first" => {
+                    if !stdin_ignored {
+                        stdin_positions.push(0);
                     }
                 }
-                if let Err(e) = writer.flush() {
-                    eprintln!("Flush error after '{}': {}", path.display(), e);
-                    had_error = true;
+                "last" => {
+                    if !stdin_ignored {
+                        stdin_positions.push(usize::MAX);
+                    }
                 }
-                eprintln!("Appended '{}' ({} bytes).", path.display(), copied);
+                number => {
+                    let position = number
+                        .parse::<usize>()
+                        .map_err(|_| format!("invalid --push-stdin-at value: {value}"))?;
+
+                    if !stdin_ignored {
+                        stdin_positions.push(position);
+                    }
+                }
             }
-            Err(e) => {
-                eprintln!("Error opening '{}': {}", path.display(), e);
-                had_error = true;
-            }
+        } else if arg.starts_with("--") {
+            return Err(format!("unknown option: {arg}"));
+        } else {
+            files.push(arg);
         }
     }
 
-    if let Err(e) = writer.flush() {
-        eprintln!("Final flush error '{}': {}", out_name, e);
-        process::exit(5);
-    }
-    drop(writer);
-
-    if had_error {
-        eprintln!("Completed with some errors. Output: {}", out_name);
-        process::exit(6);
+    if !separator_was_set {
+        separator.clear();
     }
 
-    println!("Wrote concatenated output to {}", out_name);
+    Ok(Options {
+        files,
+        separator,
+        output,
+        stdin_positions,
+        stdin_ignored,
+        show_help,
+    })
+}
+
+fn parse_separator(value: &str) -> Result<Vec<u8>, String> {
+    if value == "EOL" {
+        return Ok(if cfg!(windows) {
+            b"\r\n".to_vec()
+        } else {
+            b"\n".to_vec()
+        });
+    }
+
+    // Allow common escaped byte values while preserving all other bytes.
+    let mut result = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == b'\\' && index + 1 < bytes.len() {
+            index += 1;
+
+            match bytes[index] {
+                b'n' => result.push(b'\n'),
+                b'r' => result.push(b'\r'),
+                b't' => result.push(b'\t'),
+                b'\\' => result.push(b'\\'),
+                b'0' => result.push(0),
+                other => {
+                    result.push(b'\\');
+                    result.push(other);
+                }
+            }
+        } else {
+            result.push(bytes[index]);
+        }
+
+        index += 1;
+    }
+
+    Ok(result)
+}
+
+fn copy_stream<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    buffer: &mut [u8],
+) -> io::Result<()> {
+    loop {
+        let count = reader.read(buffer)?;
+
+        if count == 0 {
+            break;
+        }
+
+        writer.write_all(&buffer[..count])?;
+    }
+
+    Ok(())
+}
+
+fn copy_file_to_writer(
+    path: &Path,
+    writer: &mut BufWriter<Box<dyn Write>>,
+    buffer: &mut [u8],
+) -> io::Result<()> {
+    let file = File::open(path)?;
+    let mut reader = BufReader::with_capacity(BUFFER_SIZE, file);
+    copy_stream(&mut reader, writer, buffer)
+}
+
+fn copy_stdin_to_temp(temp_path: &Path) -> io::Result<()> {
+    let stdin = io::stdin();
+    let mut stdin = BufReader::with_capacity(BUFFER_SIZE, stdin.lock());
+
+    let temp_file = File::create(temp_path)?;
+    let mut temp_writer = BufWriter::with_capacity(BUFFER_SIZE, temp_file);
+
+    let mut buffer = [0u8; BUFFER_SIZE];
+    copy_stream(&mut stdin, &mut temp_writer, &mut buffer)?;
+    temp_writer.flush()
+}
+
+fn copy_temp_stdin(
+    temp_path: &Path,
+    writer: &mut BufWriter<Box<dyn Write>>,
+    buffer: &mut [u8],
+) -> io::Result<()> {
+    let file = File::open(temp_path)?;
+    let mut reader = BufReader::with_capacity(BUFFER_SIZE, file);
+    copy_stream(&mut reader, writer, buffer)
+}
+
+
+fn timestamp_filename() -> String {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let days = seconds.div_euclid(86_400);
+    let day_seconds = seconds.rem_euclid(86_400);
+
+    let hour = day_seconds / 3_600;
+    let minute = (day_seconds % 3_600) / 60;
+    let second = day_seconds % 60;
+
+    // Civil-date conversion based on Howard Hinnant's public-domain algorithm.
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let mut year = yoe + era * 400;
+    let day_of_year = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let month_part = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_part + 2) / 5 + 1;
+    let month = month_part + if month_part < 10 { 3 } else { -9 };
+
+    year += if month <= 2 { 1 } else { 0 };
+
+    format!(
+        "{:04}{:02}{:02}{:02}{:02}{:02}.txt",
+        year, month, day, hour, minute, second
+    )
+}
+
+fn make_temp_path() -> PathBuf {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+
+    env::temp_dir().join(format!(
+        "rust-concat-{}-{}.tmp",
+        process::id(),
+        timestamp
+    ))
+}
+
+fn main() -> io::Result<()> {
+    let options = match parse_args() {
+        Ok(options) => options,
+        Err(error) => {
+            eprintln!("error: {error}");
+            eprintln!("Try --help for usage.");
+            process::exit(2);
+        }
+    };
+
+    if options.show_help {
+        let program = env::args()
+            .next()
+            .unwrap_or_else(|| "concat".to_string());
+
+        print_help(&program);
+        return Ok(());
+    }
+
+    let stdin_is_available = !io::stdin().is_terminal();
+
+    let mut positions = Vec::new();
+
+    if stdin_is_available && !options.stdin_ignored {
+        if options.stdin_positions.is_empty() {
+            // Default behavior: stdin first.
+            positions.push(0);
+        } else {
+            let file_count = options.files.len();
+
+            for &position in &options.stdin_positions {
+                let normalized = if position == usize::MAX || position > file_count {
+                    file_count
+                } else {
+                    position
+                };
+
+                if !positions.contains(&normalized) {
+                    positions.push(normalized);
+                }
+            }
+
+            positions.sort_unstable();
+        }
+    }
+
+    let stdin_temp_path = if !positions.is_empty() {
+        let path = make_temp_path();
+
+        if let Err(error) = copy_stdin_to_temp(&path) {
+            let _ = fs::remove_file(&path);
+            return Err(error);
+        }
+
+        Some(path)
+    } else {
+        None
+    };
+
+    let result = run_concat(&options, &positions, stdin_temp_path.as_deref());
+
+    if let Some(path) = stdin_temp_path {
+        let _ = fs::remove_file(path);
+    }
+
+    result
+}
+
+fn run_concat(
+    options: &Options,
+    stdin_positions: &[usize],
+    stdin_temp_path: Option<&Path>,
+) -> io::Result<()> {
+    let output: Box<dyn Write> = match &options.output {
+        None => Box::new(io::stdout().lock()),
+
+        Some(path) if path.as_os_str().is_empty() => {
+            let filename = timestamp_filename();
+            Box::new(
+                OpenOptions::new()
+                    .create(true)
+                    .truncate(true)
+                    .write(true)
+                    .open(filename)?,
+            )
+        }
+
+        Some(path) => Box::new(
+            OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(path)?,
+        ),
+    };
+
+    let mut writer = BufWriter::with_capacity(BUFFER_SIZE, output);
+    let mut buffer = [0u8; BUFFER_SIZE];
+    let mut value_count = 0usize;
+
+    let mut write_separator = |writer: &mut BufWriter<Box<dyn Write>>| -> io::Result<()> {
+        if value_count > 0 {
+            writer.write_all(&options.separator)?;
+        }
+
+        value_count += 1;
+        Ok(())
+    };
+
+    for position in 0..=options.files.len() {
+        if stdin_positions.contains(&position) {
+            write_separator(&mut writer)?;
+
+            if let Some(path) = stdin_temp_path {
+                copy_temp_stdin(path, &mut writer, &mut buffer)?;
+            }
+        }
+
+        if position < options.files.len() {
+            write_separator(&mut writer)?;
+
+            copy_file_to_writer(
+                Path::new(&options.files[position]),
+                &mut writer,
+                &mut buffer,
+            )?;
+        }
+    }
+
+    writer.flush()
 }
