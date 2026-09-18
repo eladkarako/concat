@@ -1,6 +1,6 @@
 [package]
 name = "concat"
-version = "26.9.18"
+version = "26.9.19"
 edition = "2024"
 authors = ["Elad Karako <eladkarako@gmail.com>"]
 description = "join files. optionally with stdin. to stdout or file. see --help ."
