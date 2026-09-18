@@ -12,6 +12,7 @@ categories = ["command-line-utilities"]
 readme = "README.md"
 
 [dependencies]
+is-terminal = "0.4.17"
 
 [build-dependencies]
 winres = "0.1.12"
