@@ -29,19 +29,21 @@ goto MAIN
   set  ARGS=%ARGS% -sse
   set  ARGS=%ARGS% -ssw
   set  ARGS=%ARGS% -mmt4
-  set  ARGS=%ARGS% -mx0
+  set  ARGS=%ARGS% -mx9
   set  ARGS=%ARGS% -mm=Deflate
   set  ARGS=%ARGS% -mem=ZipCrypto
   set  ARGS=%ARGS% "%TARGET%.zip"
 
-  if exist ".\target\%TARGET%\release\concat.exe" ( 
-    set ARGS=%ARGS% "./target/%TARGET%/release/concat.exe"
+  if exist ".\%TARGET%\release\concat.exe" ( 
+    set ARGS=%ARGS% "./%TARGET%/release/concat.exe"
   ) else ( 
-    set ARGS=%ARGS% "./target/%TARGET%/release/concat"
+    set ARGS=%ARGS% "./%TARGET%/release/concat"
   ) 
 
-  start "" /MAX /ABOVENORMAL /WAIT /B  "7z.exe" %ARGS%
-  echo [INFO] EXIT-CODE: %ErrorLevel% 1>&2
+  ::start "" /MAX /ABOVENORMAL /WAIT /B  "7z.exe" %ARGS%
+  ::echo [INFO] EXIT-CODE: %ErrorLevel% 1>&2
+  
+  start "" /MAX /ABOVENORMAL  "7z.exe" %ARGS%
 
   endlocal
   goto :eof
@@ -50,19 +52,19 @@ goto MAIN
 
 :MAIN
 for %%x in ( 
-"x86_64-pc-windows-msvc"
-"i686-pc-windows-msvc"
-"x86_64-linux-android"
-"i686-linux-android"
-"aarch64-linux-android"
-"armv7-linux-androideabi"
-"x86_64-unknown-linux-gnu"
-"aarch64-unknown-linux-gnu"
-"x86_64-unknown-linux-musl"
-"aarch64-unknown-linux-musl"
-"powerpc-unknown-linux-gnu"
-"powerpc64-unknown-linux-gnu"
-"powerpc64le-unknown-linux-gnu"
+x86_64-pc-windows-msvc
+i686-pc-windows-msvc
+x86_64-linux-android
+i686-linux-android
+aarch64-linux-android
+armv7-linux-androideabi
+x86_64-unknown-linux-gnu
+aarch64-unknown-linux-gnu
+x86_64-unknown-linux-musl
+aarch64-unknown-linux-musl
+powerpc-unknown-linux-gnu
+powerpc64-unknown-linux-gnu
+powerpc64le-unknown-linux-gnu
 ) do ( 
   call :METHOD "%%x"
 )
