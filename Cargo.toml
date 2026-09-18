@@ -2,11 +2,20 @@
 name = "concat"
 version = "26.9.18"
 edition = "2024"
+authors = ["Elad Karako <eladkarako@gmail.com>"]
+description = "join files. optionally with stdin. to stdout or file. see --help ."
+license = "MIT"
+repository = "https://github.com/eladkarako/concat"
+homepage = "https://github.com/eladkarako/concat"
+keywords = ["concat", "streaming", "cli"]
+categories = ["command-line-utilities"]
+readme = "README.md"
 
 [dependencies]
 
 [build-dependencies]
 winres = "0.1.12"
+toml = "1.1.6"
 
 
 [profile.release]

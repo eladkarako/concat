@@ -11,6 +11,41 @@ fn main() {
     }
 
     let path_base: PathBuf = var("CARGO_MANIFEST_DIR").unwrap().into();
+    let cargo_toml_path = path_base.join("Cargo.toml");
+    let cargo_toml_content = std::fs::read_to_string(&cargo_toml_path)
+        .expect("Failed to read Cargo.toml");
+    let cargo_toml: toml::Value = toml::from_str(&cargo_toml_content)
+        .expect("Failed to parse Cargo.toml");
+
+    // Extract metadata from [package]
+    let package = &cargo_toml["package"];
+
+    let name = package["name"]
+        .as_str()
+        .unwrap_or("unknown");
+    let version = package["version"]
+        .as_str()
+        .unwrap_or("0.0.0");
+    let description = package["description"]
+        .as_str()
+        .unwrap_or("");
+    let repository = package["repository"]
+        .as_str()
+        .unwrap_or("");
+    let author: &str = package["authors"]
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown");
+
+    // Parse version into major.minor.patch.release, and shifting each into its own byte range in 64-bit integer then joining them for winres.
+    let version_parts: Vec<&str> = version.split('.').collect();
+    let major: u64 = version_parts.get(0).and_then(|v| v.parse().ok()).unwrap_or(0);
+    let minor: u64 = version_parts.get(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+    let patch: u64 = version_parts.get(2).and_then(|v| v.parse().ok()).unwrap_or(0);
+    let release: u64 = version_parts.get(3).and_then(|v| v.parse().ok()).unwrap_or(0);
+    let packed = (major << 48) | (minor << 32) | (patch << 16) | release;
+
     let path_icon = path_base.join("resources").join("app.ico");
     let path_manifest = path_base.join("resources").join("app.manifest");
     let mut res = WindowsResource::new();
@@ -22,24 +57,19 @@ fn main() {
     let langid: u16 = (sublang_english_us << 10) | lang_english;  // 0x0409 = English (United States) - C:\Program Files (x86)\Windows Kits\10\Include\10.0.28000.0\um\winnt.h
     res.set_language(langid);
 
-    //-- building VERSIONINFO
-    res.set("Comments", "https://github.com/eladkarako/concat");
-    res.set("FileDescription", "join files. optionally with stdin. to stdout or file. see --help .");
-    res.set("InternalName", "concat.exe");
-    res.set("OriginalFilename", "concat.exe");
-    res.set("CompanyName", "Elad Karako");
-    res.set("LegalCopyright", "https://github.com/eladkarako/concat/LICENSE");
-    res.set("ProductName", "concat");
+    // Build VERSIONINFO from Cargo.toml metadata
+    res.set("Comments", repository);
+    res.set("FileDescription", description);
+    res.set("InternalName", &format!("{}.exe", name));
+    res.set("OriginalFilename", &format!("{}.exe", name));
+    res.set("CompanyName", author);
+    res.set("LegalCopyright", &format!("{}/LICENSE", repository));
+    res.set("ProductName", name);
 
-    //--------------------------  remember to change version in Cargo.toml's version under [package]
-    res.set("FileVersion", "26.9.18.0");
-    res.set("ProductVersion", "26.9.18.0");
+    let version_string = format!("{}.{}.{}.{}", major, minor, patch, release);
+    res.set("FileVersion", &version_string);
+    res.set("ProductVersion", &version_string);
 
-    let major: u64 = 26;
-    let minor: u64 = 9;
-    let patch: u64 = 18;
-    let release: u64 = 0;
-    let packed = (major << 48) | (minor << 32) | (patch << 16) | release;
     res.set_version_info(winres::VersionInfo::FILEVERSION, packed);
     res.set_version_info(winres::VersionInfo::PRODUCTVERSION, packed);
 
